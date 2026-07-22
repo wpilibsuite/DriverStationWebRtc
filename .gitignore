@@ -2,3 +2,5 @@
 /out/
 /nuget/**/bin/
 /nuget/**/obj/
+/tests/managed/bin/
+/tests/managed/obj/

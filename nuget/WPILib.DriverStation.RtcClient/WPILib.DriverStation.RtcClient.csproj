@@ -1,14 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <AssemblyName>WPILib.DriverStation.RtcClient.runtime</AssemblyName>
-    <PackageId>WPILib.DriverStation.RtcClient.runtime</PackageId>
+    <AssemblyName>WPILib.DriverStation.RtcClient</AssemblyName>
+    <PackageId>WPILib.DriverStation.RtcClient</PackageId>
     <Version>0.1.0</Version>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
-    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Authors>WPILibSuite</Authors>
-    <Description>Native DriverStationRtc and OpenH264 runtime libraries for the FIRST Driver Station.</Description>
+    <Description>AOT-compatible .NET wrapper and native runtimes for the FIRST Driver Station WHEP H.264 client.</Description>
+    <PackageTags>FIRST;WPILib;WebRTC;WHEP;H264;Avalonia</PackageTags>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/wpilibsuite/DriverStationWebRtc</PackageProjectUrl>

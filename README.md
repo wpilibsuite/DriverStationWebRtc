@@ -29,6 +29,35 @@ delivery. Resuming resets the decoder and requests a keyframe. Stop each handle
 with `DriverStationRtc_StopStream()`, or stop every stream and the global WebRTC
 resources with `DriverStationRtc_StopModule()`.
 
+## .NET wrapper
+
+The `WPILib.DriverStation.RtcClient` NuGet package targets .NET 10, uses
+source-generated `LibraryImport` bindings, and is marked AOT-compatible. It
+contains the managed wrapper and both native libraries for every supported RID.
+
+```csharp
+using WPILib.DriverStation.RtcClient;
+
+DriverStationRtc.StartModule();
+using var stream = DriverStationRtc.StartStream("http://limelight.local:5807/whep");
+using var frame = new DriverStationRtcFrame();
+
+if (stream.TryGetNewestFrame(frame))
+{
+    using var framebuffer = writeableBitmap.Lock();
+    frame.CopyTo(framebuffer.Address, framebuffer.RowBytes);
+}
+
+stream.Pause();
+stream.Resume();
+stream.Stop();
+DriverStationRtc.StopModule();
+```
+
+Create the Avalonia `WriteableBitmap` with `PixelFormat.Bgra8888` and
+`AlphaFormat.Opaque`. A `DriverStationRtcFrame` owns a reusable unmanaged
+buffer; subsequent successful calls grow or reuse it, and disposal releases it.
+
 ## Windows build
 
 Visual Studio Build Tools, CMake, Ninja, and Python 3.8 or newer must be
@@ -71,14 +100,14 @@ test; Windows ARM64 is cross-compiled and link-checked on the Windows x64
 runner. CI inspects each binary's loader metadata and publishes the raw
 build-directory binaries rather than a CMake install tree.
 
-CI also creates the shared-only `WPILib.DriverStation.RtcClient.runtime` NuGet
-package. Each supported runtime identifier contains both `DriverStationRtc` and
-its matching OpenH264 binary in the same `runtimes/<rid>/native` directory. The
-package contains the aggregate `LICENSE.txt`, including all dependency license
-terms, and intentionally contains no static libraries or Windows import
-libraries. Release signing and Artifactory publishing are checked in as
-disabled workflow steps so normal CI can be proven before credentials and
-external publishing are enabled.
+CI also creates the `WPILib.DriverStation.RtcClient` NuGet package. It contains
+the .NET 10 AOT-compatible wrapper, and each supported runtime identifier
+contains both `DriverStationRtc` and its matching OpenH264 binary in the same
+`runtimes/<rid>/native` directory. The package contains the aggregate
+`LICENSE.txt`, including all dependency license terms, and intentionally
+contains no static libraries or Windows import libraries. Release signing and
+Artifactory publishing are checked in as disabled workflow steps so normal CI
+can be proven before credentials and external publishing are enabled.
 
 ## License
 

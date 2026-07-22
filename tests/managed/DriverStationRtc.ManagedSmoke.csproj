@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NativeBuildDir Condition="'$(NativeBuildDir)' == ''">$(MSBuildThisFileDirectory)../../build/windows-x64</NativeBuildDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../nuget/WPILib.DriverStation.RtcClient/WPILib.DriverStation.RtcClient.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(NativeBuildDir)/DriverStationRtc.dll')">
+    <Content Include="$(NativeBuildDir)/DriverStationRtc.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(NativeBuildDir)/openh264.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

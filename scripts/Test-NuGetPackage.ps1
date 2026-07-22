@@ -14,6 +14,8 @@ $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedPackage)
 try {
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.TrimStart('/') })
     $expectedEntries = @(
+        "lib/net10.0/WPILib.DriverStation.RtcClient.dll",
+        "lib/net10.0/WPILib.DriverStation.RtcClient.xml",
         "runtimes/win-x64/native/DriverStationRtc.dll",
         "runtimes/win-x64/native/openh264.dll",
         "runtimes/win-arm64/native/DriverStationRtc.dll",
@@ -41,12 +43,29 @@ try {
     $actualNativeEntries = @($entries | Where-Object { $_.StartsWith("runtimes/") })
     $unexpectedNativeEntries = @($actualNativeEntries | Where-Object { $expectedNativeEntries -notcontains $_ })
     if ($unexpectedNativeEntries.Count -ne 0) {
-        throw "The shared runtime package contains unexpected runtime files: $($unexpectedNativeEntries -join ', ')"
+        throw "The package contains unexpected runtime files: $($unexpectedNativeEntries -join ', ')"
     }
 
     $staticLibraries = @($entries | Where-Object { $_ -match '\.(a|lib)$' })
     if ($staticLibraries.Count -ne 0) {
-        throw "The shared runtime package contains static/import libraries: $($staticLibraries -join ', ')"
+        throw "The package contains static/import libraries: $($staticLibraries -join ', ')"
+    }
+
+    $runtimeSuffixEntries = @($entries | Where-Object { $_ -match 'RtcClient\.runtime' })
+    if ($runtimeSuffixEntries.Count -ne 0) {
+        throw "The package still contains runtime-suffixed artifacts: $($runtimeSuffixEntries -join ', ')"
+    }
+
+    $nuspecEntry = $archive.Entries | Where-Object { $_.FullName -like "*.nuspec" }
+    $nuspecReader = [System.IO.StreamReader]::new($nuspecEntry.Open())
+    try {
+        $nuspecText = $nuspecReader.ReadToEnd()
+    }
+    finally {
+        $nuspecReader.Dispose()
+    }
+    if ($nuspecText -notmatch '<id>WPILib\.DriverStation\.RtcClient</id>') {
+        throw "The NuGet package ID does not match WPILib.DriverStation.RtcClient."
     }
 
     $licenseEntry = $archive.Entries | Where-Object { $_.FullName -eq "LICENSE.txt" }
