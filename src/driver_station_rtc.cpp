@@ -274,7 +274,11 @@ private:
             peer_connection->setRemoteDescription(
                 rtc::Description(session.answer_sdp, rtc::Description::Type::Answer));
         } catch (const std::exception& exception) {
-            SetFailure(exception.what());
+            const std::string detail = exception.what();
+            SetFailure(
+                detail.empty()
+                    ? "libdatachannel threw an exception without an error message"
+                    : "libdatachannel stream setup failed: " + detail);
         } catch (...) {
             SetFailure("Unknown failure while starting the WHEP stream");
         }
@@ -291,7 +295,7 @@ private:
             RequestKeyframe();
             break;
         case rtc::PeerConnection::State::Failed:
-            SetFailure("The WebRTC peer connection failed");
+            SetFailure("The WebRTC peer connection failed", false);
             break;
         case rtc::PeerConnection::State::Disconnected:
             state_.store(DRIVER_STATION_RTC_STREAM_CONNECTING);
@@ -362,11 +366,16 @@ private:
         error_ = error;
     }
 
-    void SetFailure(const std::string& error) {
+    void SetFailure(const std::string& error, bool replace_existing = true) {
         if (stopping_.load()) {
             return;
         }
-        SetError(error.empty() ? "The stream failed without an error message" : error);
+        {
+            std::lock_guard<std::mutex> lock(error_mutex_);
+            if (replace_existing || error_.empty()) {
+                error_ = error.empty() ? "The stream failed without an error message" : error;
+            }
+        }
         state_.store(DRIVER_STATION_RTC_STREAM_FAILED);
     }
 

@@ -430,7 +430,11 @@ bool StartWhepSession(
     }
 
     const auto location = response.headers.find("location");
-    if (location == response.headers.end() ||
+    session.session_url.clear();
+    // Some embedded WHEP implementations return a usable SDP answer without
+    // creating an HTTP session resource. Streaming still works; only the
+    // optional DELETE cleanup request is unavailable in that case.
+    if (location != response.headers.end() &&
         !ResolveLocation(endpoint, location->second, session.session_url, error)) {
         return false;
     }

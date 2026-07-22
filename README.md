@@ -63,6 +63,14 @@ Create the Avalonia `WriteableBitmap` with `PixelFormat.Bgra8888` and
 `AlphaFormat.Opaque`. A `DriverStationRtcFrame` owns a reusable unmanaged
 buffer; subsequent successful calls grow or reuse it, and disposal releases it.
 
+The managed smoke application runs its offline lifecycle checks with no
+arguments. Pass either a camera IP or a complete WHEP URL to wait up to 20
+seconds for three decoded frames:
+
+```powershell
+dotnet run --project tests/managed/DriverStationRtc.ManagedSmoke.csproj -- 192.168.5.220
+```
+
 ## Windows build
 
 Visual Studio Build Tools, CMake, Ninja, and Python 3.8 or newer must be
