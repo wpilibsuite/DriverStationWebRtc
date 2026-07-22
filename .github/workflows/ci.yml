@@ -1,0 +1,286 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-unix:
+    name: Build - ${{ matrix.artifact-name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact-name: Linux
+            runner: ubuntu-24.04
+            preset: linux
+            library-name: libDriverStationRtc.so
+            openh264-name: libopenh264.so.8
+          - artifact-name: LinuxArm64
+            runner: ubuntu-24.04-arm
+            preset: linux
+            library-name: libDriverStationRtc.so
+            openh264-name: libopenh264.so.8
+          - artifact-name: macOSArm64
+            runner: macos-15
+            preset: macos
+            library-name: libDriverStationRtc.dylib
+            openh264-name: libopenh264.8.dylib
+          - artifact-name: macOSx64
+            runner: macos-15-intel
+            preset: macos
+            library-name: libDriverStationRtc.dylib
+            openh264-name: libopenh264.8.dylib
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ninja-build
+
+      - name: Install Ninja on macOS
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Verify local OpenH264 resolution on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          library="build/${{ matrix.preset }}/${{ matrix.library-name }}"
+          runtime="build/${{ matrix.preset }}/${{ matrix.openh264-name }}"
+          test -f "$runtime"
+          runpath="$(readelf -d "$library" | awk '/\((RPATH|RUNPATH)\)/ { print $NF }' | tr -d '[]')"
+          test "$runpath" = '$ORIGIN'
+          resolved="$(ldd "$library" | awk '$1 == "libopenh264.so.8" { print $3 }')"
+          test "$(realpath "$resolved")" = "$(realpath "$runtime")"
+
+      - name: Verify local OpenH264 resolution on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          library="build/${{ matrix.preset }}/${{ matrix.library-name }}"
+          runtime="build/${{ matrix.preset }}/${{ matrix.openh264-name }}"
+          test -f "$runtime"
+          otool -L "$library" | grep -F "@loader_path/${{ matrix.openh264-name }}"
+          otool -l "$library" | grep -A2 'cmd LC_RPATH' | grep -F 'path @loader_path '
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Stage raw build artifacts
+        shell: bash
+        run: |
+          mkdir -p build/artifact
+          cp "build/${{ matrix.preset }}/${{ matrix.library-name }}" build/artifact/
+          cp "build/${{ matrix.preset }}/${{ matrix.openh264-name }}" build/artifact/
+          cp "build/${{ matrix.preset }}/LICENSE.txt" build/artifact/
+          cp THIRD_PARTY_NOTICES.md include/driver_station_rtc.h build/artifact/
+
+      # Release signing is intentionally disabled until unsigned CI is stable.
+      # Enable both steps together so the NuGet job receives signed macOS binaries.
+      # - name: Import Developer ID certificate
+      #   if: >-
+      #     runner.os == 'macOS' &&
+      #     github.repository_owner == 'wpilibsuite' &&
+      #     startsWith(github.ref, 'refs/tags/v')
+      #   uses: wpilibsuite/import-signing-certificate@v2
+      #   with:
+      #     certificate-data: ${{ secrets.APPLE_CERTIFICATE_DATA }}
+      #     certificate-passphrase: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      #     keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+
+      # - name: Sign macOS binaries
+      #   if: >-
+      #     runner.os == 'macOS' &&
+      #     github.repository_owner == 'wpilibsuite' &&
+      #     startsWith(github.ref, 'refs/tags/v')
+      #   shell: bash
+      #   env:
+      #     APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+      #   run: bash scripts/Sign-macOS.sh build/artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: build/artifact
+          if-no-files-found: error
+
+  build-windows:
+    name: Build - ${{ matrix.artifact-name }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact-name: Win64
+            architecture: x64
+            test-options: ''
+          - artifact-name: WinArm64
+            architecture: arm64
+            test-options: -SkipTests
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build with Ninja in the MSVC developer environment
+        shell: pwsh
+        run: >-
+          ./scripts/Build-Windows.ps1
+          -Arch ${{ matrix.architecture }}
+          ${{ matrix.test-options }}
+
+      - name: Verify static MSVC runtime selection
+        shell: pwsh
+        run: |
+          $buildGraph = "build/windows-${{ matrix.architecture }}/build.ninja"
+          $dynamicCrtFlags = Select-String -Path $buildGraph -Pattern '(?<!\S)[/-]MDd?(?!\S)'
+          if ($dynamicCrtFlags) {
+            $dynamicCrtFlags | ForEach-Object { Write-Error $_.Line }
+            throw "The Ninja graph contains dynamic MSVC runtime flags."
+          }
+
+      - name: Verify local dependent-DLL loading policy
+        shell: pwsh
+        run: |
+          $buildDir = "build/windows-${{ matrix.architecture }}"
+          $buildGraph = Get-Content -Raw "$buildDir/build.ninja"
+          if ($buildGraph -notmatch '/DEPENDENTLOADFLAG:0x1100') {
+            throw "The DriverStationRtc link does not contain /DEPENDENTLOADFLAG:0x1100."
+          }
+          if (-not (Test-Path "$buildDir/openh264.dll")) {
+            throw "openh264.dll was not copied beside DriverStationRtc.dll."
+          }
+          ./scripts/Launch-VsDevShell.ps1 -Latest -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          $loadConfig = dumpbin /loadconfig "$buildDir/DriverStationRtc.dll" | Out-String
+          if ($loadConfig -notmatch 'Dependent Load Flag' -or $loadConfig -notmatch '(?m)^\s*1100\s') {
+            Write-Output $loadConfig
+            throw "DriverStationRtc.dll does not contain dependent load flags 0x1100."
+          }
+
+      - name: Stage raw build artifacts
+        shell: pwsh
+        run: |
+          $buildDir = "build/windows-${{ matrix.architecture }}"
+          New-Item -ItemType Directory -Force -Path build/artifact | Out-Null
+          Copy-Item "$buildDir/DriverStationRtc.dll" build/artifact/
+          Copy-Item "$buildDir/DriverStationRtc.lib" build/artifact/
+          Copy-Item "$buildDir/openh264.dll" build/artifact/
+          Copy-Item "$buildDir/LICENSE.txt" build/artifact/
+          Copy-Item THIRD_PARTY_NOTICES.md,include/driver_station_rtc.h build/artifact/
+
+      # Release signing is intentionally disabled until unsigned CI is stable.
+      # The script preserves Cisco's valid OpenH264 signature and signs every
+      # other DLL, then verifies that all DLLs have valid Authenticode signatures.
+      # - name: Sign Windows binaries
+      #   if: >-
+      #     github.repository_owner == 'wpilibsuite' &&
+      #     startsWith(github.ref, 'refs/tags/v')
+      #   shell: pwsh
+      #   env:
+      #     AZURE_SIGNING_ENDPOINT: ${{ secrets.THAD_AZURE_SIGNING_ENDPOINT }}
+      #     AZURE_SIGNING_PROFILE_NAME: ${{ secrets.THAD_AZURE_SIGNING_PROFILE_NAME }}
+      #     AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.THAD_AZURE_SIGNING_ACCOUNT_NAME }}
+      #     AZURE_CLIENT_ID: ${{ secrets.THAD_AZURE_CLIENT_ID }}
+      #     AZURE_TENANT_ID: ${{ secrets.THAD_AZURE_TENANT_ID }}
+      #     AZURE_CLIENT_SECRET: ${{ secrets.THAD_AZURE_CLIENT_SECRET }}
+      #   run: ./scripts/Sign-Windows.ps1 -Directory build/artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: build/artifact
+          if-no-files-found: error
+
+  nuget:
+    name: NuGet Package
+    needs: [build-unix, build-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/nuget-products
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Select package version
+        id: package-version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            version="${version//-/.}"
+          else
+            version="0.1.0-ci.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build shared runtime package
+        run: >-
+          dotnet pack
+          nuget/WPILib.DriverStation.RtcClient.runtime/WPILib.DriverStation.RtcClient.runtime.csproj
+          --configuration Release
+          --output build/nuget
+          --property:Version=${{ steps.package-version.outputs.version }}
+          --property:RepositoryCommit=${{ github.sha }}
+
+      - name: Validate package contents
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath build/nuget -Filter "*.nupkg")
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one shared NuGet package, found $($packages.Count)."
+          }
+          ./scripts/Test-NuGetPackage.ps1 -PackagePath $packages[0].FullName
+
+      # Artifactory publishing is intentionally disabled until unsigned CI and
+      # package validation are stable. Binary signing happens in the build jobs
+      # above before their artifacts are downloaded by this job.
+      # - name: Publish NuGet package to Artifactory
+      #   if: >-
+      #     github.repository_owner == 'wpilibsuite' &&
+      #     startsWith(github.ref, 'refs/tags/v')
+      #   shell: bash
+      #   env:
+      #     ARTIFACTORY_PUBLISH_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+      #     ARTIFACTORY_PUBLISH_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
+      #   run: >-
+      #     dotnet nuget push
+      #     "build/nuget/WPILib.DriverStation.RtcClient.runtime.${{ steps.package-version.outputs.version }}.nupkg"
+      #     --source
+      #     "https://wpilib.jfrog.io/artifactory/api/nuget/wpilib-nuget-development-local/WPILib.DriverStation.RtcClient.runtime/${{ steps.package-version.outputs.version }}"
+      #     --api-key
+      #     "${ARTIFACTORY_PUBLISH_USERNAME}:${ARTIFACTORY_PUBLISH_PASSWORD}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NuGet
+          path: build/nuget
+          if-no-files-found: error

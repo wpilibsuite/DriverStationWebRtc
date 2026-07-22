@@ -1,0 +1,4 @@
+/build/
+/out/
+/nuget/**/bin/
+/nuget/**/obj/

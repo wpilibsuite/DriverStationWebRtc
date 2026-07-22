@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>WPILib.DriverStation.RtcClient.runtime</AssemblyName>
+    <PackageId>WPILib.DriverStation.RtcClient.runtime</PackageId>
+    <Version>0.1.0</Version>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <Authors>WPILibSuite</Authors>
+    <Description>Native DriverStationRtc and OpenH264 runtime libraries for the FIRST Driver Station.</Description>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/wpilibsuite/DriverStationRtcClient</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/wpilibsuite/DriverStationRtcClient</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <ProductsDir Condition="'$(ProductsDir)' == ''">$(MSBuildThisFileDirectory)../../build/nuget-products</ProductsDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(ProductsDir)/Win64/DriverStationRtc.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <None Include="$(ProductsDir)/Win64/openh264.dll" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <None Include="$(ProductsDir)/WinArm64/DriverStationRtc.dll" Pack="true" PackagePath="runtimes/win-arm64/native" />
+    <None Include="$(ProductsDir)/WinArm64/openh264.dll" Pack="true" PackagePath="runtimes/win-arm64/native" />
+
+    <None Include="$(ProductsDir)/Linux/libDriverStationRtc.so" Pack="true" PackagePath="runtimes/linux-x64/native" />
+    <None Include="$(ProductsDir)/Linux/libopenh264.so.8" Pack="true" PackagePath="runtimes/linux-x64/native" />
+    <None Include="$(ProductsDir)/LinuxArm64/libDriverStationRtc.so" Pack="true" PackagePath="runtimes/linux-arm64/native" />
+    <None Include="$(ProductsDir)/LinuxArm64/libopenh264.so.8" Pack="true" PackagePath="runtimes/linux-arm64/native" />
+
+    <None Include="$(ProductsDir)/macOSx64/libDriverStationRtc.dylib" Pack="true" PackagePath="runtimes/osx-x64/native" />
+    <None Include="$(ProductsDir)/macOSx64/libopenh264.8.dylib" Pack="true" PackagePath="runtimes/osx-x64/native" />
+    <None Include="$(ProductsDir)/macOSArm64/libDriverStationRtc.dylib" Pack="true" PackagePath="runtimes/osx-arm64/native" />
+    <None Include="$(ProductsDir)/macOSArm64/libopenh264.8.dylib" Pack="true" PackagePath="runtimes/osx-arm64/native" />
+
+    <None Include="$(ProductsDir)/Linux/LICENSE.txt" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)../../THIRD_PARTY_NOTICES.md" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+</Project>
