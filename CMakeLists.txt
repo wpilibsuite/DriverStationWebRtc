@@ -86,6 +86,10 @@ driverstationrtc_generate_license_bundle(
 
 add_library(DriverStationRtc SHARED
     src/driver_station_rtc.cpp
+    src/frame_conversion.cpp
+    src/h264_decoder.cpp
+    src/latest_frame_store.cpp
+    src/whep_http.cpp
 )
 add_library(DriverStationRtc::DriverStationRtc ALIAS DriverStationRtc)
 target_compile_features(DriverStationRtc PRIVATE cxx_std_17)
@@ -94,6 +98,8 @@ target_include_directories(DriverStationRtc
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(DriverStationRtc
     PRIVATE
@@ -153,6 +159,18 @@ target_link_libraries(DriverStationRtcSmoke PRIVATE DriverStationRtc::DriverStat
 include(CTest)
 if(BUILD_TESTING)
     add_test(NAME DriverStationRtc.LinkSmoke COMMAND DriverStationRtcSmoke)
+
+    add_executable(DriverStationRtcFrameTest
+        tests/frame_test.cpp
+        src/frame_conversion.cpp
+        src/latest_frame_store.cpp
+    )
+    target_compile_features(DriverStationRtcFrameTest PRIVATE cxx_std_17)
+    target_include_directories(DriverStationRtcFrameTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME DriverStationRtc.FrameBuffer COMMAND DriverStationRtcFrameTest)
 endif()
 
 install(TARGETS DriverStationRtc

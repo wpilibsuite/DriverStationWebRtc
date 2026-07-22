@@ -11,8 +11,8 @@
     <Description>Native DriverStationRtc and OpenH264 runtime libraries for the FIRST Driver Station.</Description>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/wpilibsuite/DriverStationRtcClient</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/wpilibsuite/DriverStationRtcClient</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/wpilibsuite/DriverStationWebRtc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/wpilibsuite/DriverStationWebRtc</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <ProductsDir Condition="'$(ProductsDir)' == ''">$(MSBuildThisFileDirectory)../../build/nuget-products</ProductsDir>
   </PropertyGroup>

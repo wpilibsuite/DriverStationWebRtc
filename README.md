@@ -1,10 +1,33 @@
 # DriverStationRtcClient
 
-Native C ABI scaffold for the FIRST driver station H.264/WebRTC integration.
+Native C ABI client for the FIRST driver station H.264/WebRTC integration.
 The build embeds static Mbed TLS 3.6.7 and libdatachannel libraries into a
 shared `DriverStationRtc` library and downloads the Cisco OpenH264 2.6.0
 runtime for the active platform. Only the symbols listed in `exports.txt` are
 public.
+
+## Streaming API
+
+Call `DriverStationRtc_StartModule()` once, then pass a Limelight WHEP endpoint
+such as `http://limelight.local:5807/whep` to
+`DriverStationRtc_StartStream()`. Stream creation is asynchronous; the opaque
+handle can be stored in a .NET `SafeHandle`, and
+`DriverStationRtc_GetStreamState()` reports connection progress or failure.
+
+The receive track is restricted to H.264. Complete RTP access units are
+depacketized by libdatachannel, decoded by OpenH264, and converted from I420 to
+opaque BGRA8888. `DriverStationRtc_GetNewestFrame()` returns only the newest
+bitmap and returns `DRIVER_STATION_RTC_NO_FRAME` until a newer bitmap arrives.
+Its `DriverStationRtcFrame` reports width, height, stride, length, capacity, and
+timestamp. The buffer can be reused on later calls or released with
+`DriverStationRtc_FreeFrame()`; its BGRA byte order can be copied directly into
+an Avalonia `WriteableBitmap` created with `PixelFormat.Bgra8888` and
+`AlphaFormat.Opaque`.
+
+Pausing keeps the WHEP/WebRTC session alive but stops decoding and frame
+delivery. Resuming resets the decoder and requests a keyframe. Stop each handle
+with `DriverStationRtc_StopStream()`, or stop every stream and the global WebRTC
+resources with `DriverStationRtc_StopModule()`.
 
 ## Windows build
 
