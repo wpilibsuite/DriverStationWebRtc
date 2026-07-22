@@ -25,9 +25,11 @@ an Avalonia `WriteableBitmap` created with `PixelFormat.Bgra8888` and
 `AlphaFormat.Opaque`.
 
 Pausing keeps the WHEP/WebRTC session alive but stops decoding and frame
-delivery. Resuming resets the decoder and requests a keyframe. Stop each handle
-with `DriverStationRtc_StopStream()`, or stop every stream and the global WebRTC
-resources with `DriverStationRtc_StopModule()`.
+delivery. `DriverStationRtc_RequestFrame()` can request and decode exactly one
+new bitmap without leaving the paused state; repeated requests are coalesced
+until that bitmap arrives. Resuming resets the decoder and requests a keyframe.
+Stop each handle with `DriverStationRtc_StopStream()`, or stop every stream and
+the global WebRTC resources with `DriverStationRtc_StopModule()`.
 
 ## .NET wrapper
 
@@ -49,6 +51,9 @@ if (stream.TryGetNewestFrame(frame))
 }
 
 stream.Pause();
+stream.RequestFrame();
+// Poll TryGetNewestFrame() on later render ticks. After one frame arrives,
+// decoding stops again and the stream remains paused.
 stream.Resume();
 stream.Stop();
 DriverStationRtc.StopModule();

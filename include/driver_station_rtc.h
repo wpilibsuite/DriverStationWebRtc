@@ -97,6 +97,17 @@ DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_SetStreamPaused(
     DriverStationRtcStream* stream,
     int paused);
 
+/**
+ * Requests one new decoded frame while the stream remains paused.
+ *
+ * The decoder is reset, an H.264 keyframe is requested, and encoded frames are
+ * consumed only until one bitmap is published. The bitmap is then available
+ * through DriverStationRtc_GetNewestFrame(). This operation is valid only for
+ * a paused stream. Repeated requests are coalesced while one is pending.
+ */
+DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_RequestFrame(
+    DriverStationRtcStream* stream);
+
 /** Stops a stream, releases its resources, and invalidates its handle. */
 DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_StopStream(
     DriverStationRtcStream* stream);

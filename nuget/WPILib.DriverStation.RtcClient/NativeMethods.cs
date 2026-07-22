@@ -64,6 +64,9 @@ internal static partial class NativeMethods
         SafeStreamHandle stream,
         int paused);
 
+    [LibraryImport(LibraryName, EntryPoint = "DriverStationRtc_RequestFrame")]
+    internal static partial DriverStationRtcResult RequestFrame(SafeStreamHandle stream);
+
     [LibraryImport(LibraryName, EntryPoint = "DriverStationRtc_StopStream")]
     internal static partial DriverStationRtcResult StopStream(nint stream);
 

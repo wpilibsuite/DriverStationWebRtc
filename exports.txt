@@ -2,6 +2,7 @@ DriverStationRtc_StartModule
 DriverStationRtc_StopModule
 DriverStationRtc_StartStream
 DriverStationRtc_SetStreamPaused
+DriverStationRtc_RequestFrame
 DriverStationRtc_StopStream
 DriverStationRtc_GetStreamState
 DriverStationRtc_GetStreamError

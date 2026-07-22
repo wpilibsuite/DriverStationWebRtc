@@ -18,7 +18,21 @@ try
     Check(!frame.HasData, "The empty reusable frame buffer reports pixel data.");
     Check(frame.Pixels.IsEmpty, "The empty reusable frame buffer exposes pixel bytes.");
 
+    bool runningRequestRejected = false;
+    try
+    {
+        stream.RequestFrame();
+    }
+    catch (DriverStationRtcException exception)
+        when (exception.Result == DriverStationRtcResult.InvalidState)
+    {
+        runningRequestRejected = true;
+    }
+
+    Check(runningRequestRejected, "A running stream accepted a paused-frame request.");
+
     stream.Pause();
+    stream.RequestFrame();
     stream.Resume();
     stream.Stop();
 

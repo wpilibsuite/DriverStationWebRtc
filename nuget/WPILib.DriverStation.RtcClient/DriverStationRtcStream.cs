@@ -37,6 +37,25 @@ public sealed class DriverStationRtcStream : IDisposable
         SetPaused(paused: false);
     }
 
+    /// <summary>
+    /// Requests one new decoded bitmap while leaving the stream paused.
+    /// </summary>
+    /// <remarks>
+    /// This method returns immediately. The native client requests a keyframe and
+    /// decodes only until one bitmap is available through
+    /// <see cref="TryGetNewestFrame"/>. Repeated calls are coalesced while a capture
+    /// is already pending.
+    /// </remarks>
+    public void RequestFrame()
+    {
+        SafeStreamHandle handle = GetHandle();
+        DriverStationRtcResult result = NativeMethods.RequestFrame(handle);
+        if (result != DriverStationRtcResult.Success)
+        {
+            DriverStationRtc.ThrowIfFailed(result, GetError(handle));
+        }
+    }
+
     /// <summary>Pauses or resumes decoding and frame delivery.</summary>
     public void SetPaused(bool paused)
     {

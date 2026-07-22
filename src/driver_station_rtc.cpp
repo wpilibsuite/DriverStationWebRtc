@@ -95,8 +95,12 @@ public:
         }
 
         if (paused) {
-            paused_.store(true);
-            latest_frame_.DiscardPending();
+            {
+                std::lock_guard<std::mutex> lock(decoder_mutex_);
+                paused_.store(true);
+                single_frame_pending_.store(false);
+                latest_frame_.DiscardPending();
+            }
             if (state_.load() == DRIVER_STATION_RTC_STREAM_RUNNING) {
                 state_.store(DRIVER_STATION_RTC_STREAM_PAUSED);
             }
@@ -110,9 +114,10 @@ public:
                 SetFailure(decoder_error);
                 return DRIVER_STATION_RTC_DECODE_ERROR;
             }
+            single_frame_pending_.store(false);
+            latest_frame_.DiscardPending();
+            paused_.store(false);
         }
-        latest_frame_.DiscardPending();
-        paused_.store(false);
 
         std::shared_ptr<rtc::Track> track;
         std::shared_ptr<rtc::PeerConnection> peer_connection;
@@ -130,6 +135,34 @@ public:
         } else if (state_.load() != DRIVER_STATION_RTC_STREAM_FAILED) {
             state_.store(DRIVER_STATION_RTC_STREAM_CONNECTING);
         }
+        return DRIVER_STATION_RTC_SUCCESS;
+    }
+
+    DriverStationRtcResult RequestFrame() {
+        if (stopping_.load() || !paused_.load() ||
+            state_.load() == DRIVER_STATION_RTC_STREAM_FAILED) {
+            return DRIVER_STATION_RTC_INVALID_STATE;
+        }
+
+        std::string decoder_error;
+        {
+            std::lock_guard<std::mutex> lock(decoder_mutex_);
+            if (stopping_.load() || !paused_.load() ||
+                state_.load() == DRIVER_STATION_RTC_STREAM_FAILED) {
+                return DRIVER_STATION_RTC_INVALID_STATE;
+            }
+            if (single_frame_pending_.load()) {
+                return DRIVER_STATION_RTC_SUCCESS;
+            }
+            if (!decoder_.Reset(decoder_error)) {
+                SetFailure(decoder_error);
+                return DRIVER_STATION_RTC_DECODE_ERROR;
+            }
+            latest_frame_.DiscardPending();
+            single_frame_pending_.store(true);
+        }
+
+        RequestKeyframe();
         return DRIVER_STATION_RTC_SUCCESS;
     }
 
@@ -269,7 +302,8 @@ private:
     }
 
     void OnEncodedFrame(rtc::binary data, rtc::FrameInfo info) {
-        if (stopping_.load() || paused_.load() || data.empty()) {
+        if (stopping_.load() || data.empty() ||
+            (paused_.load() && !single_frame_pending_.load())) {
             return;
         }
 
@@ -285,7 +319,9 @@ private:
         std::string decoder_error;
         {
             std::lock_guard<std::mutex> lock(decoder_mutex_);
-            if (paused_.load() || stopping_.load()) {
+            const bool capture_single_frame = paused_.load();
+            if (stopping_.load() ||
+                (capture_single_frame && !single_frame_pending_.load())) {
                 return;
             }
             if (!decoder_.Decode(
@@ -299,6 +335,9 @@ private:
             }
             if (produced_frame) {
                 latest_frame_.Publish(working_frame_);
+                if (capture_single_frame) {
+                    single_frame_pending_.store(false);
+                }
             }
         }
 
@@ -335,6 +374,7 @@ private:
     std::atomic<DriverStationRtcStreamState> state_{
         DRIVER_STATION_RTC_STREAM_CONNECTING};
     std::atomic<bool> paused_{false};
+    std::atomic<bool> single_frame_pending_{false};
     std::atomic<bool> stopping_{false};
 
     mutable std::mutex error_mutex_;
@@ -466,6 +506,18 @@ extern "C" DriverStationRtcResult DriverStationRtc_SetStreamPaused(
         return implementation == nullptr
                    ? DRIVER_STATION_RTC_INVALID_ARGUMENT
                    : implementation->SetPaused(paused != 0);
+    } catch (...) {
+        return DRIVER_STATION_RTC_INTERNAL_ERROR;
+    }
+}
+
+extern "C" DriverStationRtcResult DriverStationRtc_RequestFrame(
+    DriverStationRtcStream* stream) {
+    try {
+        const auto implementation = driverstationrtc::FindStream(stream);
+        return implementation == nullptr
+                   ? DRIVER_STATION_RTC_INVALID_ARGUMENT
+                   : implementation->RequestFrame();
     } catch (...) {
         return DRIVER_STATION_RTC_INTERNAL_ERROR;
     }

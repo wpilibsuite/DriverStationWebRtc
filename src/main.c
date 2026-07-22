@@ -24,9 +24,16 @@ int main(void) {
         DriverStationRtc_StopModule();
         return 1;
     }
+    if (DriverStationRtc_RequestFrame(stream) != DRIVER_STATION_RTC_INVALID_STATE) {
+        fputs("A running stream accepted a paused-frame request.\n", stderr);
+        DriverStationRtc_StopStream(stream);
+        DriverStationRtc_StopModule();
+        return 1;
+    }
     if (DriverStationRtc_SetStreamPaused(stream, 1) != DRIVER_STATION_RTC_SUCCESS ||
+        DriverStationRtc_RequestFrame(stream) != DRIVER_STATION_RTC_SUCCESS ||
         DriverStationRtc_SetStreamPaused(stream, 0) != DRIVER_STATION_RTC_SUCCESS) {
-        fputs("Failed to pause or resume a stream.\n", stderr);
+        fputs("Failed to pause, request a frame, or resume a stream.\n", stderr);
         DriverStationRtc_StopStream(stream);
         DriverStationRtc_StopModule();
         return 1;
