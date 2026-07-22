@@ -130,16 +130,17 @@ add_custom_command(TARGET DriverStationRtc POST_BUILD
 
 if(APPLE)
     get_filename_component(openh264_runtime_name "${OPENH264_RUNTIME_FILE}" NAME)
+    set(openh264_install_name "/usr/local/lib/${openh264_runtime_name}")
     set_target_properties(DriverStationRtc PROPERTIES
         BUILD_RPATH "@loader_path"
         INSTALL_RPATH "@loader_path"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
-    # Cisco's dylib has a bare install name. Make the wrapper resolve it from
-    # the wrapper's own directory in both the build and install trees.
+    # Cisco's dylib has an absolute /usr/local/lib install name. Make the
+    # wrapper resolve it from its own directory in both build and install trees.
     add_custom_command(TARGET DriverStationRtc POST_BUILD
         COMMAND "${CMAKE_INSTALL_NAME_TOOL}" -change
-            "${openh264_runtime_name}"
+            "${openh264_install_name}"
             "@loader_path/${openh264_runtime_name}"
             "$<TARGET_FILE:DriverStationRtc>"
         VERBATIM
