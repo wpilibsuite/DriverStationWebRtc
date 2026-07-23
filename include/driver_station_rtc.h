@@ -38,15 +38,19 @@ typedef enum DriverStationRtcResult {
 typedef enum DriverStationRtcStreamState {
     DRIVER_STATION_RTC_STREAM_CONNECTING = 0,
     DRIVER_STATION_RTC_STREAM_RUNNING = 1,
-    DRIVER_STATION_RTC_STREAM_PAUSED = 2,
-    DRIVER_STATION_RTC_STREAM_STOPPED = 3,
-    DRIVER_STATION_RTC_STREAM_FAILED = 4
+    DRIVER_STATION_RTC_STREAM_STOPPED = 2,
+    DRIVER_STATION_RTC_STREAM_FAILED = 3
 } DriverStationRtcStreamState;
 
 typedef enum DriverStationRtcPixelFormat {
     /** Four bytes per pixel in memory: blue, green, red, then opaque alpha. */
     DRIVER_STATION_RTC_PIXEL_FORMAT_BGRA8888 = 1
 } DriverStationRtcPixelFormat;
+
+/** Notification callback for decoded frames and asynchronous stream errors. */
+typedef void (*DriverStationRtcFrameCallback)(
+    DriverStationRtcResult result,
+    void* user_data);
 
 /**
  * An Avalonia-ready decoded bitmap and its library-owned memory buffer.
@@ -83,30 +87,20 @@ DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_StopModule(void);
  * url may be either an HTTP URL or host:port/path; for example,
  * "http://limelight.local:5807/whep". The returned handle is valid while the
  * connection is still being established. Poll DriverStationRtc_GetStreamState
- * to distinguish connecting, running, paused, and failed streams.
+ * to distinguish connecting, running, and failed streams.
+ *
+ * callback receives DRIVER_STATION_RTC_SUCCESS after each decoded bitmap is
+ * published and can then call DriverStationRtc_GetNewestFrame(). It receives an
+ * error result for asynchronous connection or decode failures. callback runs on
+ * an internal thread and may call DriverStationRtc_StopStream(). It is never
+ * called after DriverStationRtc_StopStream() or DriverStationRtc_StopModule()
+ * has returned.
  */
 DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_StartStream(
     const char* url,
+    DriverStationRtcFrameCallback callback,
+    void* user_data,
     DriverStationRtcStream** stream);
-
-/**
- * Pauses or resumes decode and frame delivery without closing the WHEP session.
- * Pass nonzero to pause and zero to resume. Resume requests a fresh keyframe.
- */
-DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_SetStreamPaused(
-    DriverStationRtcStream* stream,
-    int paused);
-
-/**
- * Requests one new decoded frame while the stream remains paused.
- *
- * The decoder is reset, an H.264 keyframe is requested, and encoded frames are
- * consumed only until one bitmap is published. The bitmap is then available
- * through DriverStationRtc_GetNewestFrame(). This operation is valid only for
- * a paused stream. Repeated requests are coalesced while one is pending.
- */
-DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_RequestFrame(
-    DriverStationRtcStream* stream);
 
 /** Stops a stream, releases its resources, and invalidates its handle. */
 DRIVER_STATION_RTC_API DriverStationRtcResult DriverStationRtc_StopStream(

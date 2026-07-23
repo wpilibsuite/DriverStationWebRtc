@@ -11,6 +11,13 @@ class ISVCDecoder;
 
 namespace driverstationrtc {
 
+enum class H264DecodeOutcome {
+    FrameProduced,
+    NeedMoreData,
+    RecoverableError,
+    FatalError,
+};
+
 class H264Decoder {
 public:
     H264Decoder() = default;
@@ -20,13 +27,11 @@ public:
     H264Decoder& operator=(const H264Decoder&) = delete;
 
     bool Initialize(std::string& error);
-    bool Reset(std::string& error);
-    bool Decode(
+    H264DecodeOutcome Decode(
         const std::uint8_t* encoded,
         std::size_t length,
         std::uint64_t timestamp_us,
         DecodedFrame& output,
-        bool& produced_frame,
         std::string& error);
 
 private:

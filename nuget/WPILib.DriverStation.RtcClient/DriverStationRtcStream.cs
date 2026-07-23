@@ -5,11 +5,15 @@ namespace WPILib.DriverStation.RtcClient;
 /// <summary>An asynchronous receive-only WHEP stream.</summary>
 public sealed class DriverStationRtcStream : IDisposable
 {
-    private SafeStreamHandle? _handle;
+    private readonly Action cancelFrameCallback;
+    private SafeStreamHandle? handle;
 
-    internal DriverStationRtcStream(SafeStreamHandle handle)
+    internal DriverStationRtcStream(
+        SafeStreamHandle handle,
+        Action cancelFrameCallback)
     {
-        _handle = handle;
+        this.handle = handle;
+        this.cancelFrameCallback = cancelFrameCallback;
     }
 
     /// <summary>Gets the stream's current connection state.</summary>
@@ -20,50 +24,8 @@ public sealed class DriverStationRtcStream : IDisposable
     {
         get
         {
-            nint error = NativeMethods.GetStreamError(GetHandle());
+            var error = NativeMethods.GetStreamError(GetHandle());
             return error == 0 ? string.Empty : Marshal.PtrToStringUTF8(error) ?? string.Empty;
-        }
-    }
-
-    /// <summary>Pauses decoding and frame delivery while keeping the WebRTC session alive.</summary>
-    public void Pause()
-    {
-        SetPaused(paused: true);
-    }
-
-    /// <summary>Resumes decoding and requests a new H.264 keyframe.</summary>
-    public void Resume()
-    {
-        SetPaused(paused: false);
-    }
-
-    /// <summary>
-    /// Requests one new decoded bitmap while leaving the stream paused.
-    /// </summary>
-    /// <remarks>
-    /// This method returns immediately. The native client requests a keyframe and
-    /// decodes only until one bitmap is available through
-    /// <see cref="TryGetNewestFrame"/>. Repeated calls are coalesced while a capture
-    /// is already pending.
-    /// </remarks>
-    public void RequestFrame()
-    {
-        SafeStreamHandle handle = GetHandle();
-        DriverStationRtcResult result = NativeMethods.RequestFrame(handle);
-        if (result != DriverStationRtcResult.Success)
-        {
-            DriverStationRtc.ThrowIfFailed(result, GetError(handle));
-        }
-    }
-
-    /// <summary>Pauses or resumes decoding and frame delivery.</summary>
-    public void SetPaused(bool paused)
-    {
-        SafeStreamHandle handle = GetHandle();
-        DriverStationRtcResult result = NativeMethods.SetStreamPaused(handle, paused ? 1 : 0);
-        if (result != DriverStationRtcResult.Success)
-        {
-            DriverStationRtc.ThrowIfFailed(result, GetError(handle));
         }
     }
 
@@ -79,8 +41,8 @@ public sealed class DriverStationRtcStream : IDisposable
         ArgumentNullException.ThrowIfNull(frame);
         frame.ThrowIfDisposed();
 
-        SafeStreamHandle handle = GetHandle();
-        DriverStationRtcResult result = NativeMethods.GetNewestFrame(handle, ref frame.NativeFrame);
+        var activeHandle = GetHandle();
+        var result = NativeMethods.GetNewestFrame(activeHandle, ref frame.NativeFrame);
         if (result == DriverStationRtcResult.NoFrame)
         {
             return false;
@@ -88,7 +50,7 @@ public sealed class DriverStationRtcStream : IDisposable
 
         if (result != DriverStationRtcResult.Success)
         {
-            DriverStationRtc.ThrowIfFailed(result, GetError(handle));
+            DriverStationRtc.ThrowIfFailed(result, GetError(activeHandle));
         }
         return true;
     }
@@ -102,20 +64,23 @@ public sealed class DriverStationRtcStream : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        SafeStreamHandle? handle = Interlocked.Exchange(ref _handle, null);
-        handle?.Dispose();
+        var activeHandle = Interlocked.Exchange(ref handle, null);
+        activeHandle?.Dispose();
+        cancelFrameCallback();
     }
 
     private SafeStreamHandle GetHandle()
     {
-        SafeStreamHandle? handle = Volatile.Read(ref _handle);
-        ObjectDisposedException.ThrowIf(handle is null || handle.IsClosed, this);
-        return handle;
+        var activeHandle = Volatile.Read(ref handle);
+        ObjectDisposedException.ThrowIf(
+            activeHandle is null || activeHandle.IsClosed,
+            this);
+        return activeHandle;
     }
 
     private static string GetError(SafeStreamHandle handle)
     {
-        nint error = NativeMethods.GetStreamError(handle);
+        var error = NativeMethods.GetStreamError(handle);
         return error == 0 ? string.Empty : Marshal.PtrToStringUTF8(error) ?? string.Empty;
     }
 }

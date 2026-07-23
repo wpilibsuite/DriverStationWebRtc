@@ -8,6 +8,52 @@
 #include <limits>
 
 namespace driverstationrtc {
+namespace {
+
+constexpr unsigned int kFatalDecodeStateMask =
+    static_cast<unsigned int>(dsInvalidArgument) |
+    static_cast<unsigned int>(dsInitialOptExpected) |
+    static_cast<unsigned int>(dsOutOfMemory) |
+    static_cast<unsigned int>(dsDstBufNeedExpan);
+
+void AppendDecodeStateName(
+    std::string& description,
+    unsigned int state,
+    DECODING_STATE flag,
+    const char* name,
+    bool& has_name) {
+    if ((state & static_cast<unsigned int>(flag)) == 0) {
+        return;
+    }
+    description += has_name ? ", " : " (";
+    description += name;
+    has_name = true;
+}
+
+std::string DescribeDecodeState(DECODING_STATE state) {
+    const auto state_bits = static_cast<unsigned int>(state);
+    std::string description = "OpenH264 decode state ";
+    description += std::to_string(state_bits);
+
+    bool has_name = false;
+    AppendDecodeStateName(description, state_bits, dsFramePending, "frame pending", has_name);
+    AppendDecodeStateName(description, state_bits, dsRefLost, "reference lost", has_name);
+    AppendDecodeStateName(description, state_bits, dsBitstreamError, "bitstream error", has_name);
+    AppendDecodeStateName(description, state_bits, dsDepLayerLost, "dependency layer lost", has_name);
+    AppendDecodeStateName(description, state_bits, dsNoParamSets, "no parameter sets", has_name);
+    AppendDecodeStateName(description, state_bits, dsDataErrorConcealed, "data error concealed", has_name);
+    AppendDecodeStateName(description, state_bits, dsRefListNullPtrs, "invalid reference list", has_name);
+    AppendDecodeStateName(description, state_bits, dsInvalidArgument, "invalid argument", has_name);
+    AppendDecodeStateName(description, state_bits, dsInitialOptExpected, "decoder not initialized", has_name);
+    AppendDecodeStateName(description, state_bits, dsOutOfMemory, "out of memory", has_name);
+    AppendDecodeStateName(description, state_bits, dsDstBufNeedExpan, "destination buffer too small", has_name);
+    if (has_name) {
+        description += ')';
+    }
+    return description;
+}
+
+}  // namespace
 
 H264Decoder::~H264Decoder() {
     Destroy();
@@ -36,22 +82,16 @@ bool H264Decoder::Initialize(std::string& error) {
     return true;
 }
 
-bool H264Decoder::Reset(std::string& error) {
-    return Initialize(error);
-}
-
-bool H264Decoder::Decode(
+H264DecodeOutcome H264Decoder::Decode(
     const std::uint8_t* encoded,
     std::size_t length,
     std::uint64_t timestamp_us,
     DecodedFrame& output,
-    bool& produced_frame,
     std::string& error) {
-    produced_frame = false;
     if (decoder_ == nullptr || encoded == nullptr || length == 0 ||
         length > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         error = "Invalid H.264 access unit";
-        return false;
+        return H264DecodeOutcome::FatalError;
     }
 
     unsigned char* planes[3] = {nullptr, nullptr, nullptr};
@@ -63,13 +103,22 @@ bool H264Decoder::Decode(
         planes,
         &buffer_info);
 
-    if (buffer_info.iBufferStatus != 1) {
-        if (state != dsErrorFree) {
-            error = "OpenH264 rejected an H.264 access unit";
-            return false;
+    if (state != dsErrorFree) {
+        if (state == dsFramePending && buffer_info.iBufferStatus != 1) {
+            error.clear();
+            return H264DecodeOutcome::NeedMoreData;
         }
+
+        error = DescribeDecodeState(state);
+        const auto state_bits = static_cast<unsigned int>(state);
+        return (state_bits & kFatalDecodeStateMask) == 0
+                   ? H264DecodeOutcome::RecoverableError
+                   : H264DecodeOutcome::FatalError;
+    }
+
+    if (buffer_info.iBufferStatus != 1) {
         error.clear();
-        return true;
+        return H264DecodeOutcome::NeedMoreData;
     }
 
     const SSysMEMBuffer& system_buffer = buffer_info.UsrData.sSystemBuffer;
@@ -84,11 +133,11 @@ bool H264Decoder::Decode(
             timestamp_us,
             output,
             error)) {
-        return false;
+        return H264DecodeOutcome::FatalError;
     }
 
-    produced_frame = true;
-    return true;
+    error.clear();
+    return H264DecodeOutcome::FrameProduced;
 }
 
 void H264Decoder::Destroy() {

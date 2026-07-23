@@ -172,6 +172,37 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME DriverStationRtc.FrameBuffer COMMAND DriverStationRtcFrameTest)
+
+    add_executable(DriverStationRtcH264DecoderTest
+        tests/h264_decoder_test.cpp
+        src/frame_conversion.cpp
+        src/h264_decoder.cpp
+    )
+    target_compile_features(DriverStationRtcH264DecoderTest PRIVATE cxx_std_17)
+    target_include_directories(DriverStationRtcH264DecoderTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(DriverStationRtcH264DecoderTest PRIVATE OpenH264::OpenH264)
+    add_custom_command(TARGET DriverStationRtcH264DecoderTest POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:OpenH264::OpenH264>"
+            "$<TARGET_FILE_DIR:DriverStationRtcH264DecoderTest>"
+        VERBATIM
+    )
+    if(APPLE)
+        add_custom_command(TARGET DriverStationRtcH264DecoderTest POST_BUILD
+            COMMAND "${CMAKE_INSTALL_NAME_TOOL}" -change
+                "${openh264_install_name}"
+                "@loader_path/${openh264_runtime_name}"
+                "$<TARGET_FILE:DriverStationRtcH264DecoderTest>"
+            VERBATIM
+        )
+    elseif(UNIX)
+        set_target_properties(DriverStationRtcH264DecoderTest PROPERTIES
+            BUILD_RPATH "\$ORIGIN"
+        )
+    endif()
+    add_test(NAME DriverStationRtc.H264Decoder COMMAND DriverStationRtcH264DecoderTest)
 endif()
 
 install(TARGETS DriverStationRtc

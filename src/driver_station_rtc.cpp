@@ -29,10 +29,17 @@ namespace driverstationrtc {
 namespace {
 
 constexpr auto kIceGatheringTimeout = std::chrono::seconds(10);
+constexpr auto kKeyframeRequestInterval = std::chrono::seconds(1);
 
 class StreamImpl : public std::enable_shared_from_this<StreamImpl> {
 public:
-    explicit StreamImpl(std::string url) : url_(std::move(url)) {}
+    StreamImpl(
+        std::string url,
+        DriverStationRtcFrameCallback frame_callback,
+        void* frame_user_data)
+        : url_(std::move(url)),
+          frame_callback_(frame_callback),
+          frame_user_data_(frame_user_data) {}
 
     ~StreamImpl() {
         Stop();
@@ -54,11 +61,15 @@ public:
             return;
         }
 
+        CancelFrameCallback();
         gathering_cv_.notify_all();
         if (worker_.joinable()) {
-            worker_.join();
+            if (worker_.get_id() == std::this_thread::get_id()) {
+                worker_.detach();
+            } else {
+                worker_.join();
+            }
         }
-
         std::shared_ptr<rtc::Track> track;
         std::shared_ptr<rtc::PeerConnection> peer_connection;
         std::string session_url;
@@ -83,87 +94,6 @@ public:
             SetError(shutdown_error);
         }
         state_.store(DRIVER_STATION_RTC_STREAM_STOPPED);
-    }
-
-    DriverStationRtcResult SetPaused(bool paused) {
-        if (stopping_.load()) {
-            return DRIVER_STATION_RTC_INVALID_STATE;
-        }
-        const bool was_paused = paused_.load();
-        if (was_paused == paused) {
-            return DRIVER_STATION_RTC_SUCCESS;
-        }
-
-        if (paused) {
-            {
-                std::lock_guard<std::mutex> lock(decoder_mutex_);
-                paused_.store(true);
-                single_frame_pending_.store(false);
-                latest_frame_.DiscardPending();
-            }
-            if (state_.load() == DRIVER_STATION_RTC_STREAM_RUNNING) {
-                state_.store(DRIVER_STATION_RTC_STREAM_PAUSED);
-            }
-            return DRIVER_STATION_RTC_SUCCESS;
-        }
-
-        std::string decoder_error;
-        {
-            std::lock_guard<std::mutex> lock(decoder_mutex_);
-            if (!decoder_.Reset(decoder_error)) {
-                SetFailure(decoder_error);
-                return DRIVER_STATION_RTC_DECODE_ERROR;
-            }
-            single_frame_pending_.store(false);
-            latest_frame_.DiscardPending();
-            paused_.store(false);
-        }
-
-        std::shared_ptr<rtc::Track> track;
-        std::shared_ptr<rtc::PeerConnection> peer_connection;
-        {
-            std::lock_guard<std::mutex> lock(transport_mutex_);
-            track = track_;
-            peer_connection = peer_connection_;
-        }
-        if (track != nullptr && track->isOpen()) {
-            track->requestKeyframe();
-        }
-        if (peer_connection != nullptr &&
-            peer_connection->state() == rtc::PeerConnection::State::Connected) {
-            state_.store(DRIVER_STATION_RTC_STREAM_RUNNING);
-        } else if (state_.load() != DRIVER_STATION_RTC_STREAM_FAILED) {
-            state_.store(DRIVER_STATION_RTC_STREAM_CONNECTING);
-        }
-        return DRIVER_STATION_RTC_SUCCESS;
-    }
-
-    DriverStationRtcResult RequestFrame() {
-        if (stopping_.load() || !paused_.load() ||
-            state_.load() == DRIVER_STATION_RTC_STREAM_FAILED) {
-            return DRIVER_STATION_RTC_INVALID_STATE;
-        }
-
-        std::string decoder_error;
-        {
-            std::lock_guard<std::mutex> lock(decoder_mutex_);
-            if (stopping_.load() || !paused_.load() ||
-                state_.load() == DRIVER_STATION_RTC_STREAM_FAILED) {
-                return DRIVER_STATION_RTC_INVALID_STATE;
-            }
-            if (single_frame_pending_.load()) {
-                return DRIVER_STATION_RTC_SUCCESS;
-            }
-            if (!decoder_.Reset(decoder_error)) {
-                SetFailure(decoder_error);
-                return DRIVER_STATION_RTC_DECODE_ERROR;
-            }
-            latest_frame_.DiscardPending();
-            single_frame_pending_.store(true);
-        }
-
-        RequestKeyframe();
-        return DRIVER_STATION_RTC_SUCCESS;
     }
 
     DriverStationRtcResult GetNewestFrame(DriverStationRtcFrame& frame) {
@@ -239,7 +169,9 @@ private:
                 if (!gathering_cv_.wait_for(lock, kIceGatheringTimeout, [this] {
                         return gathering_complete_ || stopping_.load();
                     })) {
-                    SetFailure("Timed out while gathering ICE candidates for WHEP");
+                    SetFailure(
+                        "Timed out while gathering ICE candidates for WHEP",
+                        DRIVER_STATION_RTC_NETWORK_ERROR);
                     return;
                 }
             }
@@ -249,7 +181,9 @@ private:
 
             const auto local_description = peer_connection->localDescription();
             if (!local_description.has_value()) {
-                SetFailure("libdatachannel did not produce a WHEP SDP offer");
+                SetFailure(
+                    "libdatachannel did not produce a WHEP SDP offer",
+                    DRIVER_STATION_RTC_INTERNAL_ERROR);
                 return;
             }
 
@@ -260,7 +194,7 @@ private:
                     std::string(local_description.value()),
                     session,
                     network_error)) {
-                SetFailure(network_error);
+                SetFailure(network_error, DRIVER_STATION_RTC_NETWORK_ERROR);
                 return;
             }
             {
@@ -278,9 +212,12 @@ private:
             SetFailure(
                 detail.empty()
                     ? "libdatachannel threw an exception without an error message"
-                    : "libdatachannel stream setup failed: " + detail);
+                    : "libdatachannel stream setup failed: " + detail,
+                DRIVER_STATION_RTC_INTERNAL_ERROR);
         } catch (...) {
-            SetFailure("Unknown failure while starting the WHEP stream");
+            SetFailure(
+                "Unknown failure while starting the WHEP stream",
+                DRIVER_STATION_RTC_INTERNAL_ERROR);
         }
     }
 
@@ -290,12 +227,14 @@ private:
         }
         switch (state) {
         case rtc::PeerConnection::State::Connected:
-            state_.store(paused_.load() ? DRIVER_STATION_RTC_STREAM_PAUSED
-                                        : DRIVER_STATION_RTC_STREAM_RUNNING);
+            state_.store(DRIVER_STATION_RTC_STREAM_RUNNING);
             RequestKeyframe();
             break;
         case rtc::PeerConnection::State::Failed:
-            SetFailure("The WebRTC peer connection failed", false);
+            SetFailure(
+                "The WebRTC peer connection failed",
+                DRIVER_STATION_RTC_NETWORK_ERROR,
+                false);
             break;
         case rtc::PeerConnection::State::Disconnected:
             state_.store(DRIVER_STATION_RTC_STREAM_CONNECTING);
@@ -306,8 +245,7 @@ private:
     }
 
     void OnEncodedFrame(rtc::binary data, rtc::FrameInfo info) {
-        if (stopping_.load() || data.empty() ||
-            (paused_.load() && !single_frame_pending_.load())) {
+        if (stopping_.load() || data.empty()) {
             return;
         }
 
@@ -319,44 +257,61 @@ private:
                     .count());
         }
 
-        bool produced_frame = false;
+        bool notify_frame = false;
+        DriverStationRtcResult callback_result = DRIVER_STATION_RTC_SUCCESS;
         std::string decoder_error;
         {
             std::lock_guard<std::mutex> lock(decoder_mutex_);
-            const bool capture_single_frame = paused_.load();
-            if (stopping_.load() ||
-                (capture_single_frame && !single_frame_pending_.load())) {
+            if (stopping_.load()) {
                 return;
             }
-            if (!decoder_.Decode(
-                    reinterpret_cast<const std::uint8_t*>(data.data()),
-                    data.size(),
-                    timestamp_us,
-                    working_frame_,
-                    produced_frame,
-                    decoder_error)) {
+            const auto decode_outcome = decoder_.Decode(
+                reinterpret_cast<const std::uint8_t*>(data.data()),
+                data.size(),
+                timestamp_us,
+                working_frame_,
+                decoder_error);
+            if (decode_outcome == H264DecodeOutcome::FatalError) {
                 SetError(decoder_error);
+                notify_frame = true;
+                callback_result = DRIVER_STATION_RTC_DECODE_ERROR;
             }
-            if (produced_frame) {
+            if (decode_outcome == H264DecodeOutcome::FrameProduced) {
                 latest_frame_.Publish(working_frame_);
-                if (capture_single_frame) {
-                    single_frame_pending_.store(false);
-                }
+                SetError("");
+                notify_frame = true;
             }
         }
 
+        if (notify_frame) {
+            InvokeFrameCallback(callback_result);
+        }
         if (!decoder_error.empty()) {
+            SetError(decoder_error);
             RequestKeyframe();
         }
     }
 
     void RequestKeyframe() {
+        if (stopping_.load()) {
+            return;
+        }
         std::shared_ptr<rtc::Track> track;
         {
             std::lock_guard<std::mutex> lock(transport_mutex_);
             track = track_;
         }
         if (track != nullptr && track->isOpen()) {
+            const auto now = std::chrono::steady_clock::now();
+            {
+                std::lock_guard<std::mutex> lock(keyframe_request_mutex_);
+                if (last_keyframe_request_ !=
+                        std::chrono::steady_clock::time_point{} &&
+                    now - last_keyframe_request_ < kKeyframeRequestInterval) {
+                    return;
+                }
+                last_keyframe_request_ = now;
+            }
             track->requestKeyframe();
         }
     }
@@ -366,7 +321,54 @@ private:
         error_ = error;
     }
 
-    void SetFailure(const std::string& error, bool replace_existing = true) {
+    void InvokeFrameCallback(DriverStationRtcResult result) {
+        DriverStationRtcFrameCallback callback;
+        void* user_data;
+        {
+            std::unique_lock<std::mutex> lock(frame_callback_mutex_);
+            frame_callback_cv_.wait(lock, [this] {
+                return stopping_.load() || !frame_callback_active_;
+            });
+            if (stopping_.load() || frame_callback_ == nullptr) {
+                return;
+            }
+            callback = frame_callback_;
+            user_data = frame_user_data_;
+            frame_callback_active_ = true;
+            frame_callback_thread_ = std::this_thread::get_id();
+        }
+
+        try {
+            callback(result, user_data);
+        } catch (...) {
+            // Exceptions must never cross the C callback ABI boundary.
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+            frame_callback_active_ = false;
+            frame_callback_thread_ = {};
+        }
+        frame_callback_cv_.notify_all();
+    }
+
+    void CancelFrameCallback() {
+        std::unique_lock<std::mutex> lock(frame_callback_mutex_);
+        frame_callback_ = nullptr;
+        frame_user_data_ = nullptr;
+        frame_callback_cv_.notify_all();
+        if (frame_callback_active_ &&
+            frame_callback_thread_ != std::this_thread::get_id()) {
+            frame_callback_cv_.wait(lock, [this] {
+                return !frame_callback_active_;
+            });
+        }
+    }
+
+    void SetFailure(
+        const std::string& error,
+        DriverStationRtcResult result,
+        bool replace_existing = true) {
         if (stopping_.load()) {
             return;
         }
@@ -377,13 +379,12 @@ private:
             }
         }
         state_.store(DRIVER_STATION_RTC_STREAM_FAILED);
+        InvokeFrameCallback(result);
     }
 
     const std::string url_;
     std::atomic<DriverStationRtcStreamState> state_{
         DRIVER_STATION_RTC_STREAM_CONNECTING};
-    std::atomic<bool> paused_{false};
-    std::atomic<bool> single_frame_pending_{false};
     std::atomic<bool> stopping_{false};
 
     mutable std::mutex error_mutex_;
@@ -399,10 +400,20 @@ private:
     std::string session_url_;
     std::thread worker_;
 
+    std::mutex keyframe_request_mutex_;
+    std::chrono::steady_clock::time_point last_keyframe_request_{};
+
     std::mutex decoder_mutex_;
     H264Decoder decoder_;
     DecodedFrame working_frame_;
     LatestFrameStore latest_frame_;
+
+    std::mutex frame_callback_mutex_;
+    std::condition_variable frame_callback_cv_;
+    DriverStationRtcFrameCallback frame_callback_ = nullptr;
+    void* frame_user_data_ = nullptr;
+    bool frame_callback_active_ = false;
+    std::thread::id frame_callback_thread_;
 };
 
 std::mutex g_module_mutex;
@@ -477,14 +488,19 @@ extern "C" DriverStationRtcResult DriverStationRtc_StopModule(void) {
 
 extern "C" DriverStationRtcResult DriverStationRtc_StartStream(
     const char* url,
+    DriverStationRtcFrameCallback callback,
+    void* user_data,
     DriverStationRtcStream** stream) {
-    if (url == nullptr || url[0] == '\0' || stream == nullptr) {
+    if (url == nullptr || url[0] == '\0' || callback == nullptr || stream == nullptr) {
         return DRIVER_STATION_RTC_INVALID_ARGUMENT;
     }
     *stream = nullptr;
 
     try {
-        auto implementation = std::make_shared<driverstationrtc::StreamImpl>(url);
+        auto implementation = std::make_shared<driverstationrtc::StreamImpl>(
+            url,
+            callback,
+            user_data);
         auto handle = std::make_unique<DriverStationRtcStream>();
         std::string error;
         {
@@ -502,31 +518,6 @@ extern "C" DriverStationRtcResult DriverStationRtc_StartStream(
         return DRIVER_STATION_RTC_SUCCESS;
     } catch (const std::bad_alloc&) {
         return DRIVER_STATION_RTC_OUT_OF_MEMORY;
-    } catch (...) {
-        return DRIVER_STATION_RTC_INTERNAL_ERROR;
-    }
-}
-
-extern "C" DriverStationRtcResult DriverStationRtc_SetStreamPaused(
-    DriverStationRtcStream* stream,
-    int paused) {
-    try {
-        const auto implementation = driverstationrtc::FindStream(stream);
-        return implementation == nullptr
-                   ? DRIVER_STATION_RTC_INVALID_ARGUMENT
-                   : implementation->SetPaused(paused != 0);
-    } catch (...) {
-        return DRIVER_STATION_RTC_INTERNAL_ERROR;
-    }
-}
-
-extern "C" DriverStationRtcResult DriverStationRtc_RequestFrame(
-    DriverStationRtcStream* stream) {
-    try {
-        const auto implementation = driverstationrtc::FindStream(stream);
-        return implementation == nullptr
-                   ? DRIVER_STATION_RTC_INVALID_ARGUMENT
-                   : implementation->RequestFrame();
     } catch (...) {
         return DRIVER_STATION_RTC_INTERNAL_ERROR;
     }

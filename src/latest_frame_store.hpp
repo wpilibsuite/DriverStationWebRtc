@@ -12,7 +12,6 @@ namespace driverstationrtc {
 class LatestFrameStore {
 public:
     void Publish(DecodedFrame& frame);
-    void DiscardPending();
     DriverStationRtcResult CopyNewest(DriverStationRtcFrame& destination);
 
 private:

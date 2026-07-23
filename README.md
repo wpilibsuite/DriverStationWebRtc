@@ -13,6 +13,8 @@ such as `http://limelight.local:5807/whep` to
 `DriverStationRtc_StartStream()`. Stream creation is asynchronous; the opaque
 handle can be stored in a .NET `SafeHandle`, and
 `DriverStationRtc_GetStreamState()` reports connection progress or failure.
+The start-time callback runs after every decoded bitmap is published and also
+reports asynchronous stream errors.
 
 The receive track is restricted to H.264. Complete RTP access units are
 depacketized by libdatachannel, decoded by OpenH264, and converted from I420 to
@@ -24,10 +26,10 @@ timestamp. The buffer can be reused on later calls or released with
 an Avalonia `WriteableBitmap` created with `PixelFormat.Bgra8888` and
 `AlphaFormat.Opaque`.
 
-Pausing keeps the WHEP/WebRTC session alive but stops decoding and frame
-delivery. `DriverStationRtc_RequestFrame()` can request and decode exactly one
-new bitmap without leaving the paused state; repeated requests are coalesced
-until that bitmap arrives. Resuming resets the decoder and requests a keyframe.
+The frame callback can call `DriverStationRtc_GetNewestFrame()` immediately
+after receiving `DRIVER_STATION_RTC_SUCCESS`. Stopping the stream disables the
+callback and waits for a callback that is already running, so no callback runs
+after stop returns.
 Stop each handle with `DriverStationRtc_StopStream()`, or stop every stream and
 the global WebRTC resources with `DriverStationRtc_StopModule()`.
 
@@ -41,20 +43,20 @@ contains the managed wrapper and both native libraries for every supported RID.
 using WPILib.DriverStation.RtcClient;
 
 DriverStationRtc.StartModule();
-using var stream = DriverStationRtc.StartStream("http://limelight.local:5807/whep");
 using var frame = new DriverStationRtcFrame();
 
-if (stream.TryGetNewestFrame(frame))
+using var stream = DriverStationRtc.StartStream(
+    "http://limelight.local:5807/whep",
+    (activeStream, result) =>
 {
-    using var framebuffer = writeableBitmap.Lock();
-    frame.CopyTo(framebuffer.Address, framebuffer.RowBytes);
-}
-
-stream.Pause();
-stream.RequestFrame();
-// Poll TryGetNewestFrame() on later render ticks. After one frame arrives,
-// decoding stops again and the stream remains paused.
-stream.Resume();
+    if (result == DriverStationRtcResult.Success
+        && activeStream.TryGetNewestFrame(frame))
+    {
+        using var framebuffer = writeableBitmap.Lock();
+        frame.CopyTo(framebuffer.Address, framebuffer.RowBytes);
+    }
+});
+// The callback runs for every decoded frame until the stream is stopped.
 stream.Stop();
 DriverStationRtc.StopModule();
 ```

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -57,15 +58,11 @@ internal static partial class NativeMethods
         LibraryName,
         EntryPoint = "DriverStationRtc_StartStream",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial DriverStationRtcResult StartStream(string url, out nint stream);
-
-    [LibraryImport(LibraryName, EntryPoint = "DriverStationRtc_SetStreamPaused")]
-    internal static partial DriverStationRtcResult SetStreamPaused(
-        SafeStreamHandle stream,
-        int paused);
-
-    [LibraryImport(LibraryName, EntryPoint = "DriverStationRtc_RequestFrame")]
-    internal static partial DriverStationRtcResult RequestFrame(SafeStreamHandle stream);
+    internal static unsafe partial DriverStationRtcResult StartStream(
+        string url,
+        delegate* unmanaged[Cdecl]<DriverStationRtcResult, nint, void> callback,
+        nint userData,
+        out nint stream);
 
     [LibraryImport(LibraryName, EntryPoint = "DriverStationRtc_StopStream")]
     internal static partial DriverStationRtcResult StopStream(nint stream);

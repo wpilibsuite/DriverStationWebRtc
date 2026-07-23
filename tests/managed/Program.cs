@@ -7,32 +7,24 @@ static int RunOfflineSmoke()
     DriverStationRtc.StartModule();
     try
     {
-        using var stream = DriverStationRtc.StartStream("https://unsupported.invalid/whep");
+        var callbackCount = 0;
+        using var stream = DriverStationRtc.StartStream(
+            "https://unsupported.invalid/whep",
+            (_, _) => Interlocked.Increment(ref callbackCount));
         using var frame = new DriverStationRtcFrame();
 
         Check(!stream.TryGetNewestFrame(frame), "A new stream unexpectedly returned a frame.");
         Check(!frame.HasData, "The empty reusable frame buffer reports pixel data.");
         Check(frame.Pixels.IsEmpty, "The empty reusable frame buffer exposes pixel bytes.");
 
-        bool runningRequestRejected = false;
-        try
-        {
-            stream.RequestFrame();
-        }
-        catch (DriverStationRtcException exception)
-            when (exception.Result == DriverStationRtcResult.InvalidState)
-        {
-            runningRequestRejected = true;
-        }
-
-        Check(runningRequestRejected, "A running stream accepted a paused-frame request.");
-
-        stream.Pause();
-        stream.RequestFrame();
-        stream.Resume();
         stream.Stop();
+        var callbackCountAfterStop = Volatile.Read(ref callbackCount);
+        Thread.Sleep(50);
+        Check(
+            Volatile.Read(ref callbackCount) == callbackCountAfterStop,
+            "A frame callback ran after its stream was stopped.");
 
-        bool disposedStreamRejected = false;
+        var disposedStreamRejected = false;
         try
         {
             _ = stream.State;
@@ -53,54 +45,60 @@ static int RunOfflineSmoke()
 
 static int RunLiveStream(string endpointOrIp)
 {
-    string endpoint = NormalizeEndpoint(endpointOrIp);
+    var endpoint = NormalizeEndpoint(endpointOrIp);
     Console.WriteLine($"Connecting to {endpoint}");
 
     DriverStationRtc.StartModule();
     try
     {
-        using var stream = DriverStationRtc.StartStream(endpoint);
         using var frame = new DriverStationRtcFrame();
-        DriverStationRtcStreamState? previousState = null;
-        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-        int receivedFrames = 0;
+        using var completed = new ManualResetEventSlim();
+        var receivedFrames = 0;
+        string? failure = null;
 
-        while (DateTime.UtcNow < deadline)
+        using var stream = DriverStationRtc.StartStream(endpoint, (activeStream, result) =>
         {
-            DriverStationRtcStreamState state = stream.State;
-            if (state != previousState)
+            if (result != DriverStationRtcResult.Success)
             {
-                Console.WriteLine($"Stream state: {state}");
-                previousState = state;
+                failure = string.IsNullOrWhiteSpace(activeStream.Error)
+                    ? $"Frame callback failed with result {result}."
+                    : activeStream.Error;
+                completed.Set();
+                return;
+            }
+            if (!activeStream.TryGetNewestFrame(frame))
+            {
+                failure = "A successful frame callback did not expose a new frame.";
+                completed.Set();
+                return;
             }
 
-            if (state == DriverStationRtcStreamState.Failed)
+            var frameNumber = Interlocked.Increment(ref receivedFrames);
+            Console.WriteLine(
+                $"Frame {frameNumber}: {frame.Width}x{frame.Height}, " +
+                $"{frame.Length} bytes, stride {frame.Stride}, " +
+                $"timestamp {frame.TimestampMicroseconds} us");
+            if (frameNumber == 3)
             {
-                Console.Error.WriteLine($"Stream failed: {stream.Error}");
-                return 1;
+                completed.Set();
             }
+        });
 
-            if (stream.TryGetNewestFrame(frame))
-            {
-                ++receivedFrames;
-                Console.WriteLine(
-                    $"Frame {receivedFrames}: {frame.Width}x{frame.Height}, " +
-                    $"{frame.Length} bytes, stride {frame.Stride}, " +
-                    $"timestamp {frame.TimestampMicroseconds} us");
-                if (receivedFrames == 3)
-                {
-                    Console.WriteLine("Successfully received and decoded the H.264 stream.");
-                    return 0;
-                }
-            }
-
-            Thread.Sleep(10);
+        if (!completed.Wait(TimeSpan.FromSeconds(20)))
+        {
+            Console.Error.WriteLine(
+                $"Timed out after 20 seconds in state {stream.State}. " +
+                $"Latest error: {stream.Error}");
+            return 1;
+        }
+        if (failure is not null)
+        {
+            Console.Error.WriteLine($"Stream failed: {failure}");
+            return 1;
         }
 
-        Console.Error.WriteLine(
-            $"Timed out after 20 seconds in state {stream.State}. " +
-            $"Latest error: {stream.Error}");
-        return 1;
+        Console.WriteLine("Successfully received three callback-driven H.264 frames.");
+        return 0;
     }
     finally
     {
@@ -110,9 +108,9 @@ static int RunLiveStream(string endpointOrIp)
 
 static string NormalizeEndpoint(string endpointOrIp)
 {
-    string value = endpointOrIp.Trim();
-    if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-        value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+    var value = endpointOrIp.Trim();
+    if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
     {
         return value;
     }

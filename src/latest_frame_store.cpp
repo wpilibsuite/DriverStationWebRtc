@@ -11,11 +11,6 @@ void LatestFrameStore::Publish(DecodedFrame& frame) {
     ++sequence_;
 }
 
-void LatestFrameStore::DiscardPending() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    consumed_sequence_ = sequence_;
-}
-
 DriverStationRtcResult LatestFrameStore::CopyNewest(DriverStationRtcFrame& destination) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (sequence_ == consumed_sequence_) {

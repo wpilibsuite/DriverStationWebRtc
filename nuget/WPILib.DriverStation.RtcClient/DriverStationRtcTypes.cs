@@ -30,12 +30,10 @@ public enum DriverStationRtcStreamState
     Connecting = 0,
     /// <summary>The stream is connected and decoding frames.</summary>
     Running = 1,
-    /// <summary>The connection is alive, but decoding and delivery are paused.</summary>
-    Paused = 2,
     /// <summary>The stream has been stopped.</summary>
-    Stopped = 3,
+    Stopped = 2,
     /// <summary>The asynchronous stream setup or transport failed.</summary>
-    Failed = 4,
+    Failed = 3,
 }
 
 /// <summary>The decoded frame's memory layout.</summary>
